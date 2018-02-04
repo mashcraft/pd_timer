@@ -1,0 +1,24 @@
+Pinewood Derby Timer (PDT)
+www.miscjunk.org/mj/pg_pdt.html
+
+
+Revision history:
+
+Ver 2.50 - 10 Mar 2013
+- Fix: Racing state loop, finish detection routines optimized
+- New: Timer precision increased to 4 decimal places (0.0001) 
+- New: Option added where timer can be reset by closing start gate
+- New: Timer and displays routines modified to handle finish times > 9.999 seconds
+- Fix: Timer now goes into finish state if powered-up with the start gate open
+- Fix: Code clean-up
+
+Ver 2.00 - 2 Dec 2012
+- New: Timer modified to drive Adafruit displays
+- New: Timer modified to utilize RGB status LED
+
+Ver 1.10 - 23 Jan 2012
+- Fix: Serial communications improved
+
+Ver 1.08 - 6 Jun 2011
+- Initial release to public
+
