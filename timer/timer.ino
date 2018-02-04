@@ -22,15 +22,15 @@
 /*-----------------------------------------*
   - TIMER CONFIGURATION -
  *-----------------------------------------*/
-#define NUM_LANES    1                 // number of lanes
+#define NUM_LANES    2                 // number of lanes
 
-//#define LED_DISPLAY  1                 // Enable lane place/time displays
+#define LED_DISPLAY  1                 // Enable lane place/time displays
 #define SHOW_PLACE   1                 // Show place mode
 #define PLACE_DELAY  3                 // Delay (secs) when displaying time/place
 #define MIN_BRIGHT   0                 // minimum display brightness (0-15)
 #define MAX_BRIGHT   15                // maximum display brightness (0-15)
 
-#define GATE_RESET   0                 // Enable closing start gate to reset timer
+#define GATE_RESET   1                 // Enable closing start gate to reset timer
 /*-----------------------------------------*
   - END -
  *-----------------------------------------*/
@@ -52,7 +52,7 @@
 #define mRACING      1
 #define mFINISH      2
 
-#define START_TRIP   LOW               // start switch trip condition
+#define START_TRIP   HIGH              // start switch trip condition
 #define NULL_TIME    99.999            // null (non-finish) time
 #define NUM_DIGIT    4                 // timer resolution (# of decimals)
 #define DISP_DIGIT   4                 // total number of display digits
