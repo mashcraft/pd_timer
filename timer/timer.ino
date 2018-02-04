@@ -1,16 +1,16 @@
 /*================================================================================*
-   Pinewood Derby Timer                                Version 2.50 - 10 Mar 2013
-   www.miscjunk.org/mj/pg_pdt.html
+   Pinewood Derby Timer                                Version 3.00 - 31 Oct 2016
+   www.miscjunk.org/pdt
 
    Flexible and affordable Pinewood Derby timer that interfaces with the 
    following software:
      - PD Test/Tune/Track Utility
      - Grand Prix Race Manager software
 
-   Refer to the "PDT_MANUAL.PDF" file for setup and usage instructions.
+   Refer to the website for setup and usage instructions.
 
 
-   Copyright (C) 2011-2013 David Gadberry
+   Copyright (C) 2011-2016 David Gadberry
 
    This work is licensed under the Creative Commons Attribution-NonCommercial-
    ShareAlike 3.0 Unported License. To view a copy of this license, visit 
@@ -25,8 +25,10 @@
 #define NUM_LANES    2                 // number of lanes
 
 #define LED_DISPLAY  1                 // Enable lane place/time displays
+//#define DUAL_DISP    1                 // dual displays (front/back) per lane (4 lanes max)
+#define LARGE_DISP   1                 // utilize large Adafruit displays (see website)
 #define SHOW_PLACE   1                 // Show place mode
-#define PLACE_DELAY  3                 // Delay (secs) when displaying time/place
+#define PLACE_DELAY  3                 // Delay (secs) when displaying place/time
 #define MIN_BRIGHT   0                 // minimum display brightness (0-15)
 #define MAX_BRIGHT   15                // maximum display brightness (0-15)
 
@@ -45,12 +47,14 @@
 /*-----------------------------------------*
   - static definitions -
  *-----------------------------------------*/
-#define PDT_VERSION  "2.50"            // software version
-#define MAX_LANES    6                 // maximum number of lanes (Uno)
+#define PDT_VERSION  "3.00"            // software version
+#define MAX_LANE     6                 // maximum number of lanes (Uno)
+#define MAX_DISP     8                 // maximum number of displays (Adafruit)
 
 #define mREADY       0                 // program modes
 #define mRACING      1
 #define mFINISH      2
+#define mTEST        3
 
 #define START_TRIP   HIGH              // start switch trip condition
 #define NULL_TIME    99.999            // null (non-finish) time
@@ -60,9 +64,6 @@
 #define PWM_LED_ON   220
 #define PWM_LED_OFF  255
 #define char2int(c) (c - '0') 
-
-#define RACE_MASK    0
-#define READY_MASK   64
 
 //
 // serial messages                        <- to timer
@@ -81,6 +82,7 @@
 #define SMSG_SOLEN   'S'               // <- start solenoid
 #define SMSG_START   'B'               // -> race started
 #define SMSG_FORCE   'F'               // <- force end
+#define SMSG_RSEND   'Q'               // <- resend race data
 
 #define SMSG_LMASK   'M'               // <- mask lane
 #define SMSG_UMASK   'U'               // <- unmask all lanes
@@ -100,11 +102,11 @@ byte STATUS_LED_G = 11;                // status LED (green)
 byte START_GATE   = 12;                // start gate switch
 byte START_SOL    = 13;                // start solenoid
 
-//
-//                    Lane #    1     2     3     4     5     6
-//
-int  DISP_ADD [MAX_LANES] = {0x70, 0x71, 0x72, 0x73, 0x74, 0x75};    // display I2C addresses
-byte LANE_DET [MAX_LANES] = {   2,    3,    4,    5,    6,    7};    // finish detection pins
+//                Display #    1     2     3     4     5     6     7     8
+int  DISP_ADD [MAX_DISP] = {0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77};    // display I2C addresses
+
+//                   Lane #    1     2     3     4     5     6
+byte LANE_DET [MAX_LANE] = {   2,    3,    4,    5,    6,    7};                // finish detection pins
 
 /*-----------------------------------------*
   - global variables -
@@ -114,21 +116,38 @@ boolean       ready_first;             // first pass in ready state flag
 boolean       finish_first;            // first pass in finish state flag
 
 unsigned long start_time;              // race start time (microseconds)
-unsigned long lane_time  [MAX_LANES];  // lane finish time (microseconds)
-int           lane_place [MAX_LANES];  // lane finish place
-boolean       lane_mask  [MAX_LANES];  // lane mask status
+unsigned long lane_time  [MAX_LANE];   // lane finish time (microseconds)
+int           lane_place [MAX_LANE];   // lane finish place
+boolean       lane_mask  [MAX_LANE];   // lane mask status
 
 int           serial_data;             // serial data
 byte          mode;                    // current program mode
 
+float         display_level = -1.0;    // display brightness level
+
+#ifdef LARGE_DISP
+unsigned char msgGateC[] = {0x6D, 0x41, 0x00, 0x0F, 0x07};  // S=CL
+unsigned char msgGateO[] = {0x6D, 0x41, 0x00, 0x3F, 0x5E};  // S=OP
+unsigned char msgLight[] = {0x41, 0x41, 0x00, 0x00, 0x07};  // == L
+unsigned char msgDark [] = {0x41, 0x41, 0x00, 0x00, 0x73};  // == d
+#else
+unsigned char msgGateC[] = {0x6D, 0x48, 0x00, 0x39, 0x38};  // S=CL
+unsigned char msgGateO[] = {0x6D, 0x48, 0x00, 0x3F, 0x73};  // S=OP
+unsigned char msgLight[] = {0x48, 0x48, 0x00, 0x00, 0x38};  // == L
+unsigned char msgDark [] = {0x48, 0x48, 0x00, 0x00, 0x5e};  // == d
+#endif
+unsigned char msgDashT[] = {0x40, 0x40, 0x00, 0x40, 0x40};  // ----
+unsigned char msgDashL[] = {0x00, 0x00, 0x00, 0x40, 0x00};  //   -
+unsigned char msgBlank[] = {0x00, 0x00, 0x00, 0x00, 0x00};  // (blank)
+
 #ifdef LED_DISPLAY                     // LED display control
-Adafruit_7segment  disp_mat[MAX_LANES];
+Adafruit_7segment  disp_mat[MAX_DISP];
 #endif
 
 void initialize(boolean powerup=false);
-void dbg(int, char * msg, int val=-999);
+void dbg(int, const char * msg, int val=-999);
 void smsg(char msg, boolean crlf=true);
-void smsg_str(char * msg, boolean crlf=true);
+void smsg_str(const char * msg, boolean crlf=true);
 
 /*================================================================================*
   SETUP TIMER
@@ -149,20 +168,26 @@ void setup()
   digitalWrite(RESET_SWITCH, HIGH);    // enable pull-up resistor
   digitalWrite(START_GATE,   HIGH);    // enable pull-up resistor
 
-  for (int n=0; n<NUM_LANES; n++)
-  {
+  digitalWrite(START_SOL, LOW);
+
 #ifdef LED_DISPLAY
+  for (int n=0; n<MAX_DISP; n++)
+  {
     disp_mat[n] = Adafruit_7segment();
     disp_mat[n].begin(DISP_ADD[n]);
     disp_mat[n].clear();
     disp_mat[n].drawColon(false);
     disp_mat[n].writeDisplay();
+  }
 #endif
+
+  for (int n=0; n<MAX_LANE; n++)
+  {
     pinMode(LANE_DET[n], INPUT);
 
     digitalWrite(LANE_DET[n], HIGH);   // enable pull-up resistor
   }
-  set_led_bright();
+  set_display_brightness();
 
 /*-----------------------------------------*
   - software setup -
@@ -170,6 +195,18 @@ void setup()
   Serial.begin(9600);
   smsg(SMSG_POWER);
 
+/*-----------------------------------------*
+  - check for test mode -
+ *-----------------------------------------*/
+  if (digitalRead(RESET_SWITCH) == LOW)
+  {
+    mode = mTEST;
+    test_pdt_hw();
+  }
+
+/*-----------------------------------------*
+  - initialize timer -
+ *-----------------------------------------*/
   initialize(true);
   unmask_all_lanes();
 }
@@ -185,28 +222,28 @@ void loop()
   switch (mode)
   {
     case mREADY:
-      ready_state();
+      timer_ready_state();
       break;
     case mRACING:
-      racing_state();
+      timer_racing_state();
       break;
     case mFINISH:
-      finished_state();
+      timer_finished_state();
       break;
   }
-
 }
 
 
 /*================================================================================*
   TIMER READY STATE
  *================================================================================*/
-void ready_state()
+void timer_ready_state()
 {
   if (ready_first)
   {
     set_status_led();
-    clear_led_display(false);
+    clear_displays();
+
     ready_first = false;
   }
 
@@ -235,14 +272,14 @@ void ready_state()
 /*================================================================================*
   TIMER RACING STATE
  *================================================================================*/
-void racing_state()
+void timer_racing_state()
 {
   int lanes_left, finish_order, lane_status[NUM_LANES];
   unsigned long current_time, last_finish_time;
 
 
   set_status_led();
-  clear_led_display(true);
+  clear_displays();
 
   finish_order = 0;
   last_finish_time = 0;
@@ -274,7 +311,7 @@ void racing_state()
         }
         lane_place[n] = finish_order;
 
-        set_led_display(n, lane_place[n], lane_time[n], SHOW_PLACE);
+        update_display(n, lane_place[n], lane_time[n], SHOW_PLACE);
       }
     }
     
@@ -298,7 +335,7 @@ void racing_state()
 /*================================================================================*
   TIMER FINISHED STATE
  *================================================================================*/
-void finished_state()
+void timer_finished_state()
 {
   if (finish_first)
   {
@@ -316,8 +353,14 @@ void finished_state()
     } 
   } 
 
-  set_led_bright();
-  display_place_time();
+  if (serial_data == int(SMSG_RSEND))    // resend race data
+  {
+      smsg(SMSG_ACKNW);
+      send_race_results();
+  } 
+
+  set_display_brightness();
+  display_race_results();
 
   return;
 }
@@ -402,6 +445,116 @@ void process_general_msgs()
 
 
 /*================================================================================*
+  TEST PDT FINISH DETECTION HARDWARE
+ *================================================================================*/
+void test_pdt_hw()
+{
+  int  lane_status[NUM_LANES];
+  char ctmp[10];
+
+
+  smsg_str("TEST MODE");
+  set_status_led();
+  delay(2000); 
+
+/*-----------------------------------------*
+   show status of lane detectors
+ *-----------------------------------------*/
+  while(true)
+  {
+    for (int n=0; n<NUM_LANES; n++)
+    {
+      lane_status[n] = bitRead(PIND, LANE_DET[n]);    // read status of all lanes
+
+      if (lane_status[n] == HIGH)
+      {
+        update_display(n, msgDark);
+      }
+      else
+      {
+        update_display(n, msgLight);
+      }
+    }
+
+    if (digitalRead(RESET_SWITCH) == LOW)  // break out of this test
+    {
+      clear_displays();
+      delay(1000); 
+      break;
+    }
+    delay(100);
+  }
+
+/*-----------------------------------------*
+   show status of start gate switch
+ *-----------------------------------------*/
+  while(true)
+  {
+    if (digitalRead(START_GATE) == START_TRIP) 
+    {
+      update_display(0, msgGateO);
+    }
+    else
+    {
+      update_display(0, msgGateC);
+    }
+
+    if (digitalRead(RESET_SWITCH) == LOW)  // break out of this test
+    {
+      clear_displays();
+      delay(1000); 
+      break;
+    }
+    delay(100);
+  }
+
+/*-----------------------------------------*
+   show pattern for brightness adjustment
+ *-----------------------------------------*/
+  while(true)
+  {
+#ifdef LED_DISPLAY
+    set_display_brightness();
+
+    for (int n=0; n<NUM_LANES; n++)
+    {
+      sprintf(ctmp,"%04d", (int)display_level);
+
+      disp_mat[n].clear();
+
+      disp_mat[n].writeDigitNum(0, char2int(ctmp[0]), false);
+      disp_mat[n].writeDigitNum(1, char2int(ctmp[1]), false);
+      disp_mat[n].writeDigitNum(3, char2int(ctmp[2]), false);
+      disp_mat[n].writeDigitNum(4, char2int(ctmp[3]), false);
+
+      disp_mat[n].drawColon(false);
+      disp_mat[n].writeDisplay();
+
+#ifdef DUAL_DISP
+      disp_mat[n+4].clear();
+
+      disp_mat[n+4].writeDigitNum(0, char2int(ctmp[0]), false);
+      disp_mat[n+4].writeDigitNum(1, char2int(ctmp[1]), false);
+      disp_mat[n+4].writeDigitNum(3, char2int(ctmp[2]), false);
+      disp_mat[n+4].writeDigitNum(4, char2int(ctmp[3]), false);
+
+      disp_mat[n+4].drawColon(false);
+      disp_mat[n+4].writeDisplay();
+#endif
+    }
+#endif
+
+    if (digitalRead(RESET_SWITCH) == LOW)  // break out of this test
+    {
+      clear_displays();
+      break;
+    }
+    delay(1000);
+  }
+}
+
+
+/*================================================================================*
   SEND RACE RESULTS TO COMPUTER
  *================================================================================*/
 void send_race_results()
@@ -431,7 +584,7 @@ void send_race_results()
 /*================================================================================*
   RACE FINISHED - DISPLAY PLACE / TIME FOR ALL LANES
  *================================================================================*/
-void display_place_time()
+void display_race_results()
 {
   unsigned long now;
   static boolean display_mode;
@@ -450,11 +603,11 @@ void display_place_time()
 
   if ((now - last_display_update) > (unsigned long)(PLACE_DELAY * 1000))
   {
-    dbg(fDebug, "display_place_time");
+    dbg(fDebug, "display_race_results");
 
     for (int n=0; n<NUM_LANES; n++)
     {
-      set_led_display(n, lane_place[n], lane_time[n], display_mode);
+      update_display(n, lane_place[n], lane_time[n], display_mode);
     }
 
     display_mode = !display_mode;
@@ -466,63 +619,121 @@ void display_place_time()
 
 
 /*================================================================================*
-  SET LANE PLACE/TIME DISPLAY
+  SEND MESSAGE TO DISPLAY
  *================================================================================*/
-void set_led_display(int lane, int display_place, unsigned long display_time, int display_mode)
+void update_display(int lane, unsigned char msg[])
+{
+
+#ifdef LED_DISPLAY
+  disp_mat[lane].clear();
+#ifdef DUAL_DISP
+  disp_mat[lane+4].clear();
+#endif
+
+  for (int d = 0; d<=4; d++)
+  {
+    disp_mat[lane].writeDigitRaw(d, msg[d]);
+#ifdef DUAL_DISP
+    disp_mat[lane+4].writeDigitRaw(d, msg[d]);
+#endif
+  }
+
+  disp_mat[lane].writeDisplay();
+#ifdef DUAL_DISP
+  disp_mat[lane+4].writeDisplay();
+#endif
+#endif
+
+  return;
+}
+
+
+/*================================================================================*
+  UPDATE LANE PLACE/TIME DISPLAY
+ *================================================================================*/
+void update_display(int lane, int display_place, unsigned long display_time, int display_mode)
 {
   int c;
-  char cnum[25];
+  char ctime[10], cplace[4];
   double display_time_sec;
-  long time_int, time_dec;
+  boolean showdot;
 
 //  dbg(fDebug, "led: lane = ", lane);
 //  dbg(fDebug, "led: plce = ", display_place);
 //  dbg(fDebug, "led: time = ", display_time);
 
 #ifdef LED_DISPLAY
-  disp_mat[lane].clear();
-
   if (display_mode)
   {
     if (display_place > 0)
     {
-      sprintf(cnum,"%1d", display_place);
+      disp_mat[lane].clear();
+      disp_mat[lane].drawColon(false);
 
-      disp_mat[lane].writeDigitNum(3, char2int(cnum[0]), false);
+      sprintf(cplace,"%1d", display_place);
+      disp_mat[lane].writeDigitNum(3, char2int(cplace[0]), false);
+
+      disp_mat[lane].writeDisplay();
+
+#ifdef DUAL_DISP
+      disp_mat[lane+4].clear();
+      disp_mat[lane+4].drawColon(false);
+      disp_mat[lane+4].writeDigitNum(3, char2int(cplace[0]), false);
+      disp_mat[lane+4].writeDisplay();
+#endif
     }
     else  // did not finish
     {
-      disp_mat[lane].writeDigitRaw(3, READY_MASK);
+      update_display(lane, msgDashL);
     }
-    disp_mat[lane].drawColon(false);
-    disp_mat[lane].writeDisplay();
   }
   else
   {
-    display_time_sec = (double)(display_time / (double)1000000.0);    // elapsed time (seconds)
-
-    // work around for Arduino sprintf - float limitation
-    time_int = (long)display_time_sec;
-    time_dec = (long)((display_time_sec - (double)time_int)*(double)1000000.0);
-    time_dec += (long)50;    // round to 4th decimal
-    sprintf(cnum, "%01ld.%06ld", time_int, time_dec);
-
-    c = 0;
-    for (int d=0; d<DISP_DIGIT; d++)
+    if (display_time > 0)
     {
-      if (display_time > 0)
-      {
-        disp_mat[lane].writeDigitNum(d+int(d/2), char2int(cnum[c]), (cnum[c+1] == '.'));    // time
+      disp_mat[lane].clear();
+      disp_mat[lane].drawColon(false);
+#ifdef DUAL_DISP
+      disp_mat[lane+4].clear();
+      disp_mat[lane+4].drawColon(false);
+#endif
 
-        c++; if (cnum[c] == '.') c++;
-      }
-      else  // did not finish
+      display_time_sec = (double)(display_time / (double)1000000.0);    // elapsed time (seconds)
+      dtostrf(display_time_sec, (DISP_DIGIT+1), DISP_DIGIT, ctime);     // convert to string
+
+//      Serial.print("ctime = ["); Serial.print(ctime); Serial.println("]");
+      c = 0;
+      for (int d = 0; d<DISP_DIGIT; d++)
       {
-        disp_mat[lane].writeDigitRaw(d+int(d/2), READY_MASK);
+#ifdef LARGE_DISP
+        showdot = false;
+#else
+        showdot = (ctime[c + 1] == '.');
+#endif
+        disp_mat[lane].writeDigitNum(d + int(d / 2), char2int(ctime[c]), showdot);    // time
+#ifdef DUAL_DISP
+        disp_mat[lane+4].writeDigitNum(d + int(d / 2), char2int(ctime[c]), showdot);    // time
+#endif
+
+        c++; if (ctime[c] == '.') c++;
       }
+
+#ifdef LARGE_DISP
+      disp_mat[lane].writeDigitRaw(2, 16);
+#ifdef DUAL_DISP
+      disp_mat[lane+4].writeDigitRaw(2, 16);
+#endif
+#endif
+
+      disp_mat[lane].writeDisplay();
+#ifdef DUAL_DISP
+      disp_mat[lane+4].writeDisplay();
+#endif
     }
-    disp_mat[lane].drawColon(false);
-    disp_mat[lane].writeDisplay();
+    else  // did not finish
+    {
+      update_display(lane, msgDashT);
+    }
   }
 #endif
 
@@ -531,37 +742,23 @@ void set_led_display(int lane, int display_place, unsigned long display_time, in
 
 
 /*================================================================================*
-  CLEAR LANE PLACE/TIME DISPLAY
+  CLEAR LANE PLACE/TIME DISPLAYS
  *================================================================================*/
-void clear_led_display(boolean status)
+void clear_displays()
 {
-  int mask;
-
   dbg(fDebug, "led: CLEAR");
-
-#ifdef LED_DISPLAY
-  if (status)
-  {
-    mask = RACE_MASK;     // racing
-  }
-  else
-  {
-    mask = READY_MASK;    // ready
-  }
 
   for (int n=0; n<NUM_LANES; n++)
   {
-    disp_mat[n].clear();
-
-    for (int d=0; d<DISP_DIGIT; d++)
+    if (mode == mRACING || mode == mTEST)
     {
-      disp_mat[n].writeDigitRaw(d+int(d/2), mask);
+      update_display(n, msgBlank);     // racing
     }
-
-    disp_mat[n].drawColon(false);
-    disp_mat[n].writeDisplay();
+    else
+    {
+      update_display(n, msgDashT);     // ready
+    }
   }
-#endif
 
   return;
 }
@@ -570,9 +767,8 @@ void clear_led_display(boolean status)
 /*================================================================================*
   SET LANE DISPLAY BRIGHTNESS
  *================================================================================*/
-void set_led_bright()
+void set_display_brightness()
 {
-  static float current_level = -1.0;
   float new_level;
 
 #ifdef LED_DISPLAY
@@ -580,15 +776,18 @@ void set_led_bright()
   new_level = min(new_level, (float)MAX_BRIGHT);
   new_level = max(new_level, (float)MIN_BRIGHT);
 
-  if (fabs(new_level - current_level) > 0.3F)    // deadband to prevent flickering 
+  if (fabs(new_level - display_level) > 0.3F)    // deadband to prevent flickering 
   {                                              // between levels
     dbg(fDebug, "led: BRIGHT");
 
-    current_level = new_level;
+    display_level = new_level;
 
     for (int n=0; n<NUM_LANES; n++)
     {
-      disp_mat[n].setBrightness((int)current_level);
+      disp_mat[n].setBrightness((int)display_level);
+#ifdef DUAL_DISP
+      disp_mat[n+4].setBrightness((int)display_level);
+#endif
     }
   }
 #endif
@@ -621,6 +820,11 @@ void set_status_led()
   else if (mode == mFINISH)  // red
   {
     r_lev = PWM_LED_ON;
+  }
+  else if (mode == mTEST)    // yellow
+  {
+    r_lev = PWM_LED_ON;
+    g_lev = PWM_LED_ON;
   }
 
   analogWrite(STATUS_LED_R,  r_lev);
@@ -703,7 +907,7 @@ void unmask_all_lanes()
 /*================================================================================*
   SEND DEBUG TO COMPUTER
  *================================================================================*/
-void dbg(int flag, char * msg, int val)
+void dbg(int flag, const char * msg, int val)
 {  
   char tmps[50];
 
@@ -748,7 +952,7 @@ void smsg(char msg, boolean crlf)
 /*================================================================================*
   SEND SERIAL MESSAGE (STRING) TO COMPUTER
  *================================================================================*/
-void smsg_str(char * msg, boolean crlf)
+void smsg_str(const char * msg, boolean crlf)
 {  
   if (crlf)
   {
