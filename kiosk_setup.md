@@ -29,12 +29,13 @@ sudo apt-get update
 ```sudo apt-get install derbynet-extras```
 
 1. Setup kiosk autostart
-```mkdir ~/.config/autostart/
+```
+mkdir ~/.config/autostart/
 cp /usr/share/derbynet/autostart/kiosk.desktop ~/.config/autostart
 ```
 Update settings ```sudo vi /etc/derbynet.conf```
  DERBYNET_SERVER should be the url to your derbynet host
- KIOSK_NAME should be something unique for easy identification and management
+ ADDRESS should be something unique for easy identification and management
  
 1. Connect to the Wi-Fi network you will use at the race.
 
